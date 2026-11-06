@@ -13,8 +13,11 @@
       }
     },
     "mpm": {
-      "listings": {},
-      "empty_warned": true
+      "listings": {
+        "https://mpmproperties.ae/en/properties/property-details?PropertyId=MPM-R-3590": "Apartment Rent 70,000 per year Spacious 1BR Apartment | Airport Road Location: Airport Road, Abu Dhabi Reference: MPM-R-3590 1 2 609.5 Sqft",
+        "https://mpmproperties.ae/en/properties/property-details?PropertyId=MPM-R-3566": "Apartment Rent 75,000 per year Brand New 1 Bedroom Apartment in Al Falah street Location: Jawazat Street, Abu Dhabi Reference: MPM-R-3566 1 2 814 Sqft",
+        "https://mpmproperties.ae/en/properties/property-details?PropertyId=MPM-R-3173": "Apartment Rent 80,000 per year Spacious 1BR | Gym & Pool | Parking Location: Al Reem Island, Abu Dhabi Reference: MPM-R-3173 1 2 775 Sqft"
+      }
     }
   }
 }
