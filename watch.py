@@ -167,18 +167,31 @@ SET_SELECT_JS = """([want, needs]) => {
 }"""
 
 
+# Click a search/apply button only if one sits inside the filter panel itself
+# (the smallest element holding all the filter dropdowns). MPM's filters
+# normally apply on change, so usually there is none.
 CLICK_SEARCH_JS = """() => {
-    const isBtn = el => /^(button|input|a)$/i.test(el.tagName) &&
-        (el.type === 'submit' || /search|find|filter|apply/i.test(el.innerText || el.value || ''));
-    const city = [...document.querySelectorAll('select')]
-        .find(s => [...s.options].some(o => o.text.trim() === 'Abu Dhabi'));
-    for (let node = city; node; node = node.parentElement) {
-        const btn = [...node.querySelectorAll('button, input[type=submit], input[type=button], a')]
-            .find(isBtn);
-        if (btn) { btn.click(); return (btn.tagName + ' ' + (btn.innerText || btn.value || '')).trim().slice(0, 60); }
-    }
-    return false;
+    const sels = [...document.querySelectorAll('select')].filter(s => {
+        const t = [...s.options].map(o => o.text.trim());
+        return t.includes('Abu Dhabi') || t.includes('Villa') || t.includes('Sale') || t.includes('5');
+    });
+    if (!sels.length) return null;
+    let panel = sels[0];
+    while (panel.parentElement && !sels.every(s => panel.contains(s))) panel = panel.parentElement;
+    const btn = [...panel.querySelectorAll('button, input[type=submit], input[type=button], a')]
+        .find(el => /search|find|filter|apply/i.test(el.innerText || el.value || ''));
+    if (!btn) return null;
+    btn.click();
+    return (btn.tagName + ' ' + (btn.innerText || btn.value || '')).trim().slice(0, 60);
 }"""
+
+DESCRIBE_SELECTS_JS = """() => [...document.querySelectorAll('select')].map(s => {
+    const attrs = [...s.attributes].map(a => `${a.name}=${a.value}`.slice(0, 80)).join(' ');
+    const opts = [...s.options].slice(0, 4).map(o => `${o.text.trim()}=${o.value}`).join(', ');
+    const visible = !!(s.offsetWidth || s.offsetHeight);
+    return `<select ${attrs}> visible=${visible} [${opts}...]`;
+})"""
+
 
 # Click the pagination's "Next" (an element whose container also has "Last").
 CLICK_NEXT_JS = """() => {
@@ -215,6 +228,15 @@ def scrape_mpm(page: Page) -> dict[str, str]:
     open_page(page, MPM_URL, "a[href*='PropertyId=']")
     print(f"MPM: {link_count(page, 'PropertyId=')} listing links before filtering")
 
+    for line in page.evaluate(DESCRIBE_SELECTS_JS):
+        print(f"MPM:   {line}")
+    requests: list[str] = []
+    page.on(
+        "request",
+        lambda r: requests.append(f"{r.method} {r.url[:200]}")
+        if r.resource_type in ("xhr", "fetch", "document") else None,
+    )
+
     missing = [
         name for name, (want, needs) in MPM_FILTERS.items()
         if not page.evaluate(SET_SELECT_JS, [want, needs])
@@ -233,8 +255,10 @@ def scrape_mpm(page: Page) -> dict[str, str]:
     selected = page.evaluate(
         "() => [...document.querySelectorAll('select')].map(s => s.options[s.selectedIndex]?.text.trim())"
     )
-    print(f"MPM: after search url={page.url} selects={selected} "
+    print(f"MPM: after filtering url={page.url} selects={selected} "
           f"listing links={link_count(page, 'PropertyId=')}")
+    for r in requests[:15]:
+        print(f"MPM:   request {r}")
 
     listings: dict[str, str] = {}
     for page_no in range(1, 31):
