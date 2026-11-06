@@ -185,14 +185,6 @@ CLICK_SEARCH_JS = """() => {
     return (btn.tagName + ' ' + (btn.innerText || btn.value || '')).trim().slice(0, 60);
 }"""
 
-DESCRIBE_SELECTS_JS = """() => [...document.querySelectorAll('select')].map(s => {
-    const attrs = [...s.attributes].map(a => `${a.name}=${a.value}`.slice(0, 80)).join(' ');
-    const opts = [...s.options].slice(0, 4).map(o => `${o.text.trim()}=${o.value}`).join(', ');
-    const visible = !!(s.offsetWidth || s.offsetHeight);
-    return `<select ${attrs}> visible=${visible} [${opts}...]`;
-})"""
-
-
 # Click the pagination's "Next" (an element whose container also has "Last").
 CLICK_NEXT_JS = """() => {
     const cands = [...document.querySelectorAll('a, button, li, span')]
@@ -228,15 +220,6 @@ def scrape_mpm(page: Page) -> dict[str, str]:
     open_page(page, MPM_URL, "a[href*='PropertyId=']")
     print(f"MPM: {link_count(page, 'PropertyId=')} listing links before filtering")
 
-    for line in page.evaluate(DESCRIBE_SELECTS_JS):
-        print(f"MPM:   {line}")
-    requests: list[str] = []
-    page.on(
-        "request",
-        lambda r: requests.append(f"{r.method} {r.url[:200]}")
-        if r.resource_type in ("xhr", "fetch", "document") else None,
-    )
-
     missing = [
         name for name, (want, needs) in MPM_FILTERS.items()
         if not page.evaluate(SET_SELECT_JS, [want, needs])
@@ -257,8 +240,6 @@ def scrape_mpm(page: Page) -> dict[str, str]:
     )
     print(f"MPM: after filtering url={page.url} selects={selected} "
           f"listing links={link_count(page, 'PropertyId=')}")
-    for r in requests[:15]:
-        print(f"MPM:   request {r}")
 
     listings: dict[str, str] = {}
     for page_no in range(1, 31):
