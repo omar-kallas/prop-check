@@ -84,6 +84,23 @@ def clean(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()[:300]
 
 
+def open_page(page: Page, url: str, ready_selector: str) -> None:
+    """Load a page without waiting for full network idle (analytics can keep it busy)."""
+    page.goto(url, wait_until="domcontentloaded", timeout=90_000)
+    try:
+        page.wait_for_selector(ready_selector, timeout=45_000)
+    except Exception:
+        print(f"  (no '{ready_selector}' appeared on {url})")
+    page.wait_for_timeout(2000)
+
+
+def link_count(page: Page, needle: str) -> int:
+    return page.evaluate(
+        "n => [...document.querySelectorAll('a[href]')].filter(a => a.href.includes(n)).length",
+        needle,
+    )
+
+
 def snapshot(page: Page, name: str) -> None:
     DEBUG_DIR.mkdir(exist_ok=True)
     (DEBUG_DIR / f"{name}.html").write_text(page.content(), encoding="utf-8")
@@ -99,7 +116,7 @@ RELAAM_KEY = r"/(propert|listing|unit|apartment)[^?#]*(\d{4,}|[0-9a-f]{8}-[0-9a-
 
 
 def scrape_relaam(page: Page) -> dict[str, str]:
-    page.goto(RELAAM_URL, wait_until="networkidle", timeout=90_000)
+    open_page(page, RELAAM_URL, "a[href*='/properties/apartment']")
     scroll_to_bottom(page)
     search_path = urlparse(RELAAM_URL).path.rstrip("/")
     listings: dict[str, str] = {}
@@ -158,7 +175,7 @@ CLICK_SEARCH_JS = """() => {
     for (let node = city; node; node = node.parentElement) {
         const btn = [...node.querySelectorAll('button, input[type=submit], input[type=button], a')]
             .find(isBtn);
-        if (btn) { btn.click(); return true; }
+        if (btn) { btn.click(); return (btn.tagName + ' ' + (btn.innerText || btn.value || '')).trim().slice(0, 60); }
     }
     return false;
 }"""
@@ -195,7 +212,8 @@ def mpm_page_listings(page: Page) -> dict[str, str]:
 
 
 def scrape_mpm(page: Page) -> dict[str, str]:
-    page.goto(MPM_URL, wait_until="networkidle", timeout=90_000)
+    open_page(page, MPM_URL, "a[href*='PropertyId=']")
+    print(f"MPM: {link_count(page, 'PropertyId=')} listing links before filtering")
 
     missing = [
         name for name, (want, needs) in MPM_FILTERS.items()
@@ -206,9 +224,17 @@ def scrape_mpm(page: Page) -> dict[str, str]:
 
     # Submit the filter form: the nearest search/submit button around the dropdowns.
     clicked = page.evaluate(CLICK_SEARCH_JS)
-    print(f"MPM: search button {'clicked' if clicked else 'not found (relying on auto-filter)'}")
-    page.wait_for_load_state("networkidle", timeout=60_000)
-    page.wait_for_timeout(2500)
+    print(f"MPM: search button: {clicked or 'not found (relying on auto-filter)'}")
+    try:
+        page.wait_for_load_state("networkidle", timeout=30_000)
+    except Exception:
+        pass
+    page.wait_for_timeout(4000)
+    selected = page.evaluate(
+        "() => [...document.querySelectorAll('select')].map(s => s.options[s.selectedIndex]?.text.trim())"
+    )
+    print(f"MPM: after search url={page.url} selects={selected} "
+          f"listing links={link_count(page, 'PropertyId=')}")
 
     listings: dict[str, str] = {}
     for page_no in range(1, 31):
@@ -218,8 +244,11 @@ def scrape_mpm(page: Page) -> dict[str, str]:
             snapshot(page, "mpm")
         if len(listings) == before or not page.evaluate(CLICK_NEXT_JS):
             break
-        page.wait_for_load_state("networkidle", timeout=60_000)
-        page.wait_for_timeout(2000)
+        try:
+            page.wait_for_load_state("networkidle", timeout=30_000)
+        except Exception:
+            pass
+        page.wait_for_timeout(2500)
 
     return {
         url: text for url, text in listings.items()
