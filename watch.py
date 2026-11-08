@@ -12,6 +12,7 @@ import os
 import re
 import sys
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
@@ -21,6 +22,8 @@ NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "").strip()
 ROOT = Path(__file__).parent
 SEEN_FILE = ROOT / "seen.json"
 DEBUG_DIR = ROOT / "debug"
+
+DUBAI = timezone(timedelta(hours=4))  # UAE has no daylight saving
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -278,7 +281,8 @@ def load_state() -> dict:
     return data
 
 
-def check(key: str, scrape, page: Page, state: dict) -> None:
+def check(key: str, scrape, page: Page, state: dict) -> str:
+    """Check one site, send its notifications, and return a one-line status."""
     label, url, _ = SOURCES[key]
     src = state["sources"].setdefault(key, {})
     seen: dict = src.setdefault("listings", {})
@@ -303,7 +307,7 @@ def check(key: str, scrape, page: Page, state: dict) -> None:
                 tags="warning",
             )
             src["empty_warned"] = True
-        return
+        return f"{label}: no listings found (check the workflow run)"
     src.pop("empty_warned", None)
 
     new = {u: t for u, t in current.items() if u not in seen}
@@ -327,20 +331,33 @@ def check(key: str, scrape, page: Page, state: dict) -> None:
     for link, text in current.items():
         seen.setdefault(link, text)
     print(f"{label}: {len(new)} new")
+    return f"{label}: {len(current)} listings, {len(new)} new"
 
 
 def main() -> int:
     only = sys.argv[1:]  # optional: run specific sources, e.g. `python watch.py mpm`
     state = load_state()
+    statuses: list[str] = []
     with sync_playwright() as p:
         browser = p.chromium.launch()
         for key, (_, _, scrape) in SOURCES.items():
             if only and key not in only:
                 continue
             page = browser.new_page(viewport={"width": 1366, "height": 900}, user_agent=USER_AGENT)
-            check(key, scrape, page, state)
+            statuses.append(check(key, scrape, page, state))
             page.close()
         browser.close()
+
+    # Daily heartbeat: the first full run of each day (Dubai time) always reports in.
+    today = datetime.now(DUBAI).strftime("%Y-%m-%d")
+    if not only and state.get("last_daily") != today:
+        notify(
+            "Property watcher is running",
+            "\n".join(statuses) + f"\nChecked {datetime.now(DUBAI):%H:%M}",
+            tags="heartbeat",
+        )
+        state["last_daily"] = today
+
     SEEN_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
     return 0
 
